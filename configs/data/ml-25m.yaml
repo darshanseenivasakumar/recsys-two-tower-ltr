@@ -1,0 +1,16 @@
+# Data pipeline config for MovieLens-25M (no user demographics in this dataset).
+dataset: ml-25m
+
+positive_threshold: 4.0  # ML-25M has half-star ratings; 4.0 and above count as positive
+
+paths:
+  raw_dir: data/raw
+  processed_dir: data/processed
+  splits_dir: data/splits
+
+split:
+  strategy: global_temporal
+  val_frac: 0.05  # 25M interactions: 5% is still ~1.25M rows
+  test_frac: 0.05
+  n_val: 1
+  n_test: 1

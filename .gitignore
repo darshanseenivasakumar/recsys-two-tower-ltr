@@ -1,9 +1,10 @@
-# Data and artifacts are reproducible from code; never commit them.
-data/
-mlruns/
-mlartifacts/
-mlflow.db
-artifacts/
+# Data and artifacts are reproducible from code; never commit them. Anchored to the repo
+# root (leading /): an unanchored `data/` also matched src/recsys/data and configs/data.
+/data/
+/mlruns/
+/mlartifacts/
+/mlflow.db
+/artifacts/
 
 # Python
 .venv/

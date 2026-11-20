@@ -1,0 +1,20 @@
+# Data pipeline config for MovieLens-1M.
+# Switch datasets by pointing the CLI at configs/data/ml-25m.yaml instead; no code changes.
+dataset: ml-1m
+
+# Implicit feedback: an interaction is a positive if rating >= this threshold.
+positive_threshold: 4.0
+
+paths:
+  raw_dir: data/raw
+  processed_dir: data/processed
+  splits_dir: data/splits
+
+split:
+  # global_temporal: one time cutoff for everyone (mimics deploying a model on a date).
+  # leave_last_n:    each user's last N interactions are held out (common in papers, leaks globally).
+  strategy: global_temporal
+  val_frac: 0.1   # fraction of interactions (by time) for validation
+  test_frac: 0.1  # fraction of interactions (by time) for test
+  n_val: 1        # only used by leave_last_n
+  n_test: 1       # only used by leave_last_n
