@@ -1,0 +1,61 @@
+# docker compose up --build   ->  API :8000, Redis :6379, MLflow UI :5000
+services:
+  redis:
+    image: redis:7.4-alpine
+    # The interaction log is rebuilt from the bundle by `seed`; no persistence needed here.
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      retries: 30
+
+  seed:                       # one-shot: load the bundle's snapshot into Redis
+    image: recsys-serving:latest
+    build: .
+    command: ["python", "-m", "recsys.serving.seed", "--bundle", "/app/bundle/ml-1m",
+              "--redis-url", "redis://redis:6379/0"]
+    depends_on:
+      redis: {condition: service_healthy}
+    restart: "no"
+
+  api:
+    image: recsys-serving:latest
+    build: .
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      WEB_CONCURRENCY: "${WEB_CONCURRENCY:-4}"
+      # MovieLens ends in 2003: serve "as of" the snapshot cutoff, like the offline
+      # evaluation. A live deployment sets "wall".
+      RECSYS_CLOCK: snapshot
+      FEATURE_SAMPLE_RATE: "0.05"   # share of requests whose features feed drift monitoring
+      RANKER_NUM_THREADS: "${RANKER_NUM_THREADS:-1}"   # 4 workers x 1-2 threads <= 8 cores
+      # the same trees compiled to native code; served only if bit-identical at startup
+      RANKER_BACKEND: "${RANKER_BACKEND:-lleaves}"
+      THREADPOOL_TOKENS: "${THREADPOOL_TOKENS:-0}"   # 0 = anyio default (40 per worker)
+      # "shared": uvicorn --workers; "per-worker": one SO_REUSEPORT socket each (launch.py)
+      SERVER_SOCKETS: "${SERVER_SOCKETS:-per-worker}"
+      LOG_FORMAT: json
+    ports: ["8000:8000"]
+    # compiled rankers, keyed by model + compiler + CPU: only a new model recompiles (~3 min)
+    volumes:
+      - ranker-cache:/home/app/.cache/recsys-ranker
+    depends_on:
+      seed: {condition: service_completed_successfully}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 5s
+      retries: 20
+      start_period: 240s   # first start compiles the ranker (~3 min); cached starts take seconds
+
+  mlflow:                     # experiment browser over the local tracking DB
+    image: ghcr.io/mlflow/mlflow:v3.18.0
+    command: ["mlflow", "server", "--backend-store-uri", "sqlite:////mlflow/mlflow.db",
+              "--host", "0.0.0.0", "--port", "5000"]
+    volumes:
+      - ./mlflow.db:/mlflow/mlflow.db
+      - ./mlruns:/mlflow/mlruns
+    ports: ["5000:5000"]
+
+volumes:
+  ranker-cache:

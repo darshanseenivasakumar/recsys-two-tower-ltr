@@ -1,0 +1,7 @@
+# Only what the serving image needs.
+*
+!pyproject.toml
+!src/
+!docker/requirements-serve.txt
+!artifacts/serving/ml-1m/
+**/__pycache__

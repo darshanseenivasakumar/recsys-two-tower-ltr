@@ -1,0 +1,45 @@
+# Phase 2 baseline experiments. Every combination in `grid` (merged with `fixed`) is
+# evaluated on validation; the best by `selection` is refit on train+val and scored on test.
+# Note: write small floats as 1.0e-5, not 1e-5. PyYAML (YAML 1.1) reads "1e-5" as a STRING.
+
+mlflow:
+  tracking_uri: sqlite:///mlflow.db
+  experiment_prefix: baselines
+
+eval:
+  k_max: 200
+  ks: [10, 20, 50, 100, 200]
+  selection:
+    segment: warm      # test is ~98% warm users on ML-1M; see recsys/eval/protocol.py
+    metric: ndcg@10
+
+models:
+  random:
+    fixed: {seed: 0}
+
+# Run 2 grids: run 1 picked edge values (KNN k=500 = max, BPR lr=1e-3 = min, ALS factors=64
+# = min, most_popular 7 days = shortest window), so each range is extended past that edge
+# while keeping the run-1 winner inside it.
+  most_popular:
+    grid:
+      window_days: [null, 1, 3, 7, 14, 30]
+
+  item_knn:
+    grid:
+      k_neighbors: [200, 500, 1000, 2000, 3882]  # 3882 = every other item (no pruning)
+      shrink: [0.0, 10.0]
+
+  als:
+    # Run 3: run 2 picked regularization=100 (max), alpha=5 (min), factors=64 (max).
+    fixed: {iterations: 15, seed: 42}
+    grid:
+      factors: [64, 128]
+      regularization: [100.0, 300.0, 1000.0]  # implicit's lambda is NOT scaled by #ratings
+      alpha: [1.0, 2.0, 5.0]
+
+  bpr:
+    fixed: {batch_size: 4096, seed: 42, dim: 64}
+    grid:
+      lr: [2.5e-4, 5.0e-4, 1.0e-3]
+      epochs: [30, 60]  # a lower lr may need more epochs to converge
+      reg: [1.0e-5, 1.0e-3]

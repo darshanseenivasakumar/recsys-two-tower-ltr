@@ -1,0 +1,75 @@
+# Phase 4: LightGBM LambdaRank over the union of two-tower and BPR candidates.
+mlflow:
+  tracking_uri: sqlite:///mlflow.db
+  experiment_prefix: ranker
+
+# Ranker training data comes from time windows whose labels lie AFTER everything the
+# window's retrievers and features were fit on:
+#   w1: train[ts < q]  -> train[ts >= q]      (ranker training)
+#   w2: train          -> val                 (ranker training + held-out users)
+#   w3: train + val    -> test                (final evaluation, once)
+# w1 exists because val is 55% cold users while test is 97.6% warm.
+#
+# Each training-window user also contributes `sessions_per_user` "session" queries: the
+# decision time is a random label-period event, the user's history runs up to it, the
+# models stay frozen at the window cutoff (what the API serves mid-session). Without them
+# the ranker only ever saw requests made at the cutoff, and the drift monitor caught the
+# mismatch on day 0 (days since last interaction: mean 15.2 in training vs 0.6 serving).
+# w3 (test) keeps one cutoff query per user: the protocol every model was scored on.
+windows:
+  extra_cut_quantile: 0.85
+  sessions_per_user: 3
+  seed: 0
+
+retrievers:
+  tt:                     # selected Phase 3 config (alpha = 3, 9 epochs)
+    two_tower_config: artifacts/two_tower/ml-1m/config.json
+    k: 200
+  bpr:                    # selected Phase 2 params
+    baselines_report: reports/baselines_ml-1m.json
+    k: 200
+
+holdout:                  # w2 users held out for early stopping and model selection
+  frac: 0.25
+  seed: 0
+
+eval:
+  ks: [10, 20, 50, 100]
+  # Selection rule, fixed before the run: among grid points whose held-out warm NDCG@10 is
+  # within `tolerance` (relative) of the best, serve the one with the lowest measured
+  # single-thread predict time per request. LightGBM is half of a request's CPU, and its
+  # cost is linear in trees (~11 us / tree / request), so near-ties go to fewer trees.
+  selection: {segment: warm, metric: ndcg@10, tolerance: 0.01}
+
+lgbm:
+  fixed:
+    feature_fraction: 0.8
+    bagging_fraction: 0.8
+    bagging_freq: 1
+    lambda_l2: 1.0
+    seed: 42
+  grid:
+    learning_rate: [0.05, 0.1, 0.2, 0.3]
+    num_leaves: [31, 63]
+    min_child_samples: [50, 200]
+  num_boost_round: 2000
+  early_stopping_rounds: 100
+
+# Scoring cap: the ranker scores only candidates some retriever ranked in its top `cap`
+# (LightGBM cost is linear in rows). Rule, fixed before the run: smallest cap whose
+# held-out warm NDCG@10 is within `tolerance` of scoring every candidate.
+score_cap:
+  caps: [150, 120, 100, 80, 60, 50]
+  tolerance: 0.01
+
+mmr:
+  pool: 50                # re-rank the ranker's top-50 into a top-10
+  k: 10
+  lambdas: [1.0, 0.9, 0.8, 0.7, 0.5, 0.3]
+  # Served lambda, picked on the held-out w2 users (never test) with the rule "smallest
+  # lambda whose NDCG@10 is within 1% of lambda = 1" (reports/ranker_ml-1m.md):
+  #   current ranker: 0.9 -> -0.8%, 0.8 -> -0.8%, 0.7 -> -2.2%, 0.5 -> -4.4%   => 0.8
+  #   (pre-fix ranker: 0.9 -> +0.1%, 0.8 -> 0.0%, 0.7 -> -0.6%, 0.5 -> -2.8% => 0.7)
+  serve_lambda: 0.8
+
+artifacts_dir: artifacts/ranker

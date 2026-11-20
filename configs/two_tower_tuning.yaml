@@ -1,0 +1,44 @@
+# Two-tower tuning round (validation only; run with --val-only, never touches test).
+# Round 1: one knob at a time against the reference config (T=0.05, full logQ).
+mlflow:
+  tracking_uri: sqlite:///mlflow.db
+  experiment_prefix: two-tower-tuning
+
+eval:
+  k_max: 200
+  ks: [10, 20, 50, 100, 200]
+  selection:
+    segment: warm
+    metric: recall@200
+
+model:
+  id_dim: 64
+  side_dim: 16
+  hidden_dim: 128
+  out_dim: 64
+  max_history: 50
+  temperature: 0.05
+  logq_correction: true
+  user_id_dropout: 0.1
+  lr: 1.0e-3
+  batch_size: 1024
+  epochs: 15
+  seed: 42
+
+# Round 1 (reports/two_tower_tuning_r1_ml-1m.md), val warm recall@200, base = 0.4288:
+#   weight_decay 0.1 -> 0.4347, 1.0 -> 0.4579 | dropout 0.2 -> 0.4159 | no user ID -> 0.4268
+#   logq_alpha 1.25 -> 0.4647, 1.5 -> 0.4781 | batch 4096 + lr 2e-3 -> 0.4426 | lr 3e-4 -> 0.4343
+# Training logits are s - alpha*log q; rare items get the biggest boost, which the model
+# learns to cancel, so serving scores push rare items DOWN. alpha > 1 leans toward popular
+# items, alpha < 1 toward the tail (smoke run: alpha=0.5 -> ARP 710 vs 861 at alpha=1).
+#
+# Round 2: push alpha further, then combine it with the two knobs that helped.
+grid:
+  - {logq_alpha: [2.0, 3.0]}
+  - {logq_alpha: [1.5, 2.0], weight_decay: [1.0]}
+  - {logq_alpha: [1.5, 2.0], use_user_id: [false]}
+  - {logq_alpha: [2.0], weight_decay: [1.0], use_user_id: [false]}
+
+# unused in --val-only mode, but Context reads it
+ann: {k: 200}
+artifacts_dir: artifacts/two_tower

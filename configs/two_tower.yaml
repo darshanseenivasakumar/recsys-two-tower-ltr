@@ -1,0 +1,46 @@
+# Phase 3: two-tower retrieval.
+mlflow:
+  tracking_uri: sqlite:///mlflow.db
+  experiment_prefix: two-tower
+
+eval:
+  k_max: 200
+  ks: [10, 20, 50, 100, 200]
+  selection:            # retrieval is judged on recall, not top-10 precision
+    segment: warm
+    metric: recall@200
+
+model:                  # fixed hyperparameters (TwoTowerConfig fields)
+  id_dim: 64
+  side_dim: 16
+  hidden_dim: 128
+  out_dim: 64
+  max_history: 50
+  user_id_dropout: 0.1
+  lr: 1.0e-3
+  batch_size: 1024
+  epochs: 20            # upper bound; the best epoch on validation is used for the test refit
+  seed: 42
+
+# Tuned in configs/two_tower_tuning.yaml (reports/two_tower_tuning_r{1,2}_ml-1m.md): the
+# logQ strength alpha was the only knob that kept helping (val warm recall@200 0.429 at
+# alpha=1 -> 0.492 at 3); weight decay, dropout and dropping the user ID added nothing on
+# top. alpha=4 guards against alpha=3 sitting on the grid edge. The logQ-off point is the
+# ablation row (its best config from the first run).
+grid:
+  - {logq_alpha: [3.0, 4.0]}
+  - {logq_correction: [false], temperature: [0.1]}
+
+ann:
+  k: 200
+  ivf: {nlist: 64, nprobe: [1, 2, 4, 8, 16]}
+  hnsw: {M: 32, ef_construction: 200, ef_search: [16, 32, 64, 128, 256]}
+  # ML-1M's 3.9k items are too few for ANN to matter, so we also time a synthetic catalog
+  # built by jittering real item vectors. Its numbers are ANN-vs-exact only, not accuracy.
+  synthetic:
+    n_items: 300000
+    noise: 0.1
+    ivf: {nlist: 2048, nprobe: [8, 32, 64]}
+    hnsw: {M: 32, ef_construction: 100, ef_search: [64, 128, 256]}
+
+artifacts_dir: artifacts/two_tower
